@@ -25,15 +25,37 @@ public class AuthDtos {
             String username,
             String email,
             String fullName,
-            UserRole role) {
+            UserRole role,
+            boolean isVerified) {
     }
 
     public record AuthPayload(
             UserResponse user,
-            String token) {
+            String token,
+            boolean requiresVerification,
+            String verificationIdentifier) {
     }
 
     public record UpdateProfileRequest(
             @NotBlank String fullName) {
+    }
+
+    public record VerificationStatusRequest(
+            @NotBlank String identifier) {
+    }
+
+    public record VerifyEmailRequest(
+            @NotBlank String identifier,
+            @NotBlank @Size(min = 6, max = 6) String code) {
+    }
+
+    public record ResendVerificationCodeRequest(
+            @NotBlank String identifier) {
+    }
+
+    public record VerificationStatusResponse(
+            String username,
+            String email,
+            boolean isVerified) {
     }
 }

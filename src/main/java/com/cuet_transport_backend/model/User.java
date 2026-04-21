@@ -45,6 +45,17 @@ public class User {
     @JsonIgnore
     private String password;
 
+    @Column
+    private Boolean isVerified;
+
+    @Column(length = 10)
+    @JsonIgnore
+    private String verificationCode;
+
+    @Column
+    @JsonIgnore
+    private OffsetDateTime verificationCodeExpiresAt;
+
     @Column(nullable = false)
     private OffsetDateTime createdAt;
 
@@ -56,6 +67,9 @@ public class User {
         OffsetDateTime now = OffsetDateTime.now();
         createdAt = now;
         updatedAt = now;
+        if (isVerified == null) {
+            isVerified = Boolean.FALSE;
+        }
     }
 
     @PreUpdate

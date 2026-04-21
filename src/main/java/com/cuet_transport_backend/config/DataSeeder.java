@@ -95,6 +95,7 @@ public class DataSeeder implements CommandLineRunner {
         user.setFullName(fullName);
         user.setRole(role);
         user.setPassword(passwordEncoder.encode(rawPassword));
+        user.setIsVerified(Boolean.TRUE);
         return userRepository.save(user);
     }
 

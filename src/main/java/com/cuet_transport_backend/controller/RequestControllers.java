@@ -152,7 +152,8 @@ public class RequestControllers {
     // Ambulance requests
     @GetMapping("/ambulance-requests")
     public List<AmbulanceRequestResponse> allAmbulanceRequests() {
-        return ambulanceRequestRepository.findAll().stream().map(this::toAmbulanceRequestResponse).toList();
+        return ambulanceRequestRepository.findAllWithRequesterAndAmbulance().stream().map(this::toAmbulanceRequestResponse)
+                .toList();
     }
 
     @GetMapping("/ambulance-requests/{id}")
@@ -190,14 +191,17 @@ public class RequestControllers {
     public List<AmbulanceRequestResponse> ambulanceByRequester(@PathVariable Long requesterId) {
         User requester = userRepository.findById(requesterId)
                 .orElseThrow(() -> new IllegalArgumentException("Requester not found"));
-        return ambulanceRequestRepository.findByRequester(requester).stream().map(this::toAmbulanceRequestResponse)
+        return ambulanceRequestRepository.findByRequesterWithRequesterAndAmbulance(requester).stream()
+            .map(this::toAmbulanceRequestResponse)
                 .toList();
     }
 
     @GetMapping("/ambulance-requests/by-status/{status}")
     public List<AmbulanceRequestResponse> ambulanceByStatus(@PathVariable String status) {
         AmbulanceRequestStatus parsed = AmbulanceRequestStatus.fromValue(status);
-        return ambulanceRequestRepository.findByStatus(parsed).stream().map(this::toAmbulanceRequestResponse).toList();
+        return ambulanceRequestRepository.findByStatusWithRequesterAndAmbulance(parsed).stream()
+                .map(this::toAmbulanceRequestResponse)
+                .toList();
     }
 
     @PutMapping("/ambulance-requests/{requestId}/assign/{ambulanceId}")
@@ -303,7 +307,7 @@ public class RequestControllers {
     }
 
     private AmbulanceRequest findAmbulanceRequest(Long id) {
-        return ambulanceRequestRepository.findById(id)
+        return ambulanceRequestRepository.findByIdWithRequesterAndAmbulance(id)
                 .orElseThrow(() -> new IllegalArgumentException("Ambulance request not found"));
     }
 

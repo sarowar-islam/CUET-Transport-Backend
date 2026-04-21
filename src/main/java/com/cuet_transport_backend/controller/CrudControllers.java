@@ -204,17 +204,21 @@ public class CrudControllers {
     }
 
     // Routes
-    public record RouteResponse(Long id, String name, String color, List<Stop> stops) {
+    public record StopResponse(Long id, String name, Double latitude, Double longitude) {
+    }
+
+    public record RouteResponse(Long id, String name, String color, List<StopResponse> stops) {
     }
 
     @GetMapping("/routes")
     public List<RouteResponse> allRoutes() {
         List<RouteResponse> response = new ArrayList<>();
         for (Route route : routeRepository.findAll()) {
-            List<Stop> stops = routeStopRepository.findByRouteOrderByStopOrderAsc(route)
+            List<StopResponse> stops = routeStopRepository.findByRouteWithStopOrderByStopOrderAsc(route)
                     .stream()
                     .sorted(Comparator.comparing(RouteStop::getStopOrder))
                     .map(RouteStop::getStop)
+                    .map(stop -> new StopResponse(stop.getId(), stop.getName(), stop.getLatitude(), stop.getLongitude()))
                     .toList();
             response.add(new RouteResponse(route.getId(), route.getName(), route.getColor(), stops));
         }
@@ -224,10 +228,11 @@ public class CrudControllers {
     @GetMapping("/routes/{id}")
     public RouteResponse routeById(@PathVariable Long id) {
         Route route = routeRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("Route not found"));
-        List<Stop> stops = routeStopRepository.findByRouteOrderByStopOrderAsc(route)
+        List<StopResponse> stops = routeStopRepository.findByRouteWithStopOrderByStopOrderAsc(route)
                 .stream()
                 .sorted(Comparator.comparing(RouteStop::getStopOrder))
                 .map(RouteStop::getStop)
+                .map(stop -> new StopResponse(stop.getId(), stop.getName(), stop.getLatitude(), stop.getLongitude()))
                 .toList();
         return new RouteResponse(route.getId(), route.getName(), route.getColor(), stops);
     }
