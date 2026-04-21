@@ -15,10 +15,12 @@ import com.cuet_transport_backend.repository.UserRepository;
 import com.cuet_transport_backend.security.JwtService;
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
+import java.time.Year;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.MailException;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -81,6 +83,9 @@ public class AuthService {
                 .orElseThrow(() -> new IllegalArgumentException("Invalid credentials"));
 
         if (!Boolean.TRUE.equals(user.getIsVerified())) {
+            applyNewVerificationCode(user);
+            User saved = userRepository.save(user);
+            sendVerificationEmail(saved);
             throw new IllegalArgumentException("Email not verified. Please verify your email before signing in.");
         }
 
@@ -95,7 +100,8 @@ public class AuthService {
 
     public VerificationStatusResponse getVerificationStatus(VerificationStatusRequest request) {
         User user = resolveUserByIdentifier(request.identifier());
-        return new VerificationStatusResponse(user.getUsername(), user.getEmail(), Boolean.TRUE.equals(user.getIsVerified()));
+        return new VerificationStatusResponse(user.getUsername(), user.getEmail(),
+                Boolean.TRUE.equals(user.getIsVerified()));
     }
 
     @Transactional
@@ -120,6 +126,7 @@ public class AuthService {
         user.setVerificationCode(null);
         user.setVerificationCodeExpiresAt(null);
         User verifiedUser = userRepository.save(user);
+        sendWelcomeEmailBestEffort(verifiedUser);
 
         return new AuthPayload(toUserResponse(verifiedUser), generateToken(verifiedUser), false, null);
     }
@@ -193,21 +200,113 @@ public class AuthService {
             throw new IllegalArgumentException("Email service is not configured");
         }
 
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(fromEmail);
-        message.setTo(user.getEmail());
-        message.setSubject("CUET Transport Email Verification Code");
-        message.setText("Hello " + user.getFullName() + ",\n\n"
-                + "Your verification code is: " + user.getVerificationCode() + "\n"
-                + "This code will expire in " + verificationCodeExpiryMinutes + " minutes.\n\n"
-                + "If you did not create this account, please ignore this email.\n\n"
-                + "CUET Transport Section");
+        String subject = "CUET Transport: Verify Your Email";
+        String recipientName = escapeHtml(user.getFullName());
+        String code = escapeHtml(user.getVerificationCode());
+        String htmlBody = """
+                <div style=\"font-family:Arial,Helvetica,sans-serif;background-color:#f6f8fb;padding:24px;color:#1f2937;\">
+                    <table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" width=\"100%%\" style=\"max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;\">
+                        <tr>
+                            <td style=\"background:#0f4c81;padding:20px 24px;color:#ffffff;\">
+                                <h2 style=\"margin:0;font-size:20px;\">CUET Transport Section</h2>
+                                <p style=\"margin:8px 0 0 0;font-size:14px;opacity:0.95;\">Email Verification Required</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style=\"padding:24px;\">
+                                <p style=\"margin:0 0 12px 0;font-size:15px;\">Hello <strong>%s</strong>,</p>
+                                <p style=\"margin:0 0 16px 0;font-size:15px;line-height:1.6;\">Use the verification code below to complete your account verification.</p>
+                                <div style=\"margin:20px 0;padding:16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;text-align:center;\">
+                                    <div style=\"font-size:12px;letter-spacing:0.08em;color:#0369a1;text-transform:uppercase;margin-bottom:8px;\">Verification Code</div>
+                                    <div style=\"font-size:32px;letter-spacing:0.22em;font-weight:700;color:#0c4a6e;\">%s</div>
+                                </div>
+                                <p style=\"margin:0 0 12px 0;font-size:14px;color:#374151;\">This code will expire in <strong>%d minutes</strong>.</p>
+                                <p style=\"margin:0;font-size:13px;color:#6b7280;\">If you did not create this account, please ignore this email.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style=\"padding:16px 24px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;\">
+                                CUET Transport Section • Chittagong University of Engineering and Technology
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                """
+                .formatted(recipientName, code, verificationCodeExpiryMinutes);
 
         try {
-            mailSender.send(message);
-        } catch (Exception ex) {
+            sendHtmlEmail(user.getEmail(), subject, htmlBody);
+        } catch (MailException ex) {
             throw new IllegalArgumentException("Failed to send verification email. Please try again.");
         }
+    }
+
+    private void sendWelcomeEmailBestEffort(User user) {
+        if (fromEmail == null || fromEmail.isBlank()) {
+            return;
+        }
+
+        String recipientName = escapeHtml(user.getFullName());
+        String role = escapeHtml(user.getRole().name().toLowerCase());
+        String subject = "Welcome to CUET Transport Section";
+        String htmlBody = """
+                <div style=\"font-family:Arial,Helvetica,sans-serif;background-color:#f6f8fb;padding:24px;color:#1f2937;\">
+                    <table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" width=\"100%%\" style=\"max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;\">
+                        <tr>
+                            <td style=\"background:#14532d;padding:20px 24px;color:#ffffff;\">
+                                <h2 style=\"margin:0;font-size:20px;\">Welcome to CUET Transport</h2>
+                                <p style=\"margin:8px 0 0 0;font-size:14px;opacity:0.95;\">Your email is now verified</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style=\"padding:24px;\">
+                                <p style=\"margin:0 0 12px 0;font-size:15px;\">Hello <strong>%s</strong>,</p>
+                                <p style=\"margin:0 0 12px 0;font-size:15px;line-height:1.6;\">Your account has been successfully verified. You can now sign in and use all available transport services.</p>
+                                <p style=\"margin:0 0 12px 0;font-size:14px;color:#374151;\">Registered role: <strong>%s</strong></p>
+                                <p style=\"margin:0;font-size:14px;color:#374151;\">We are glad to have you with us.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style=\"padding:16px 24px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;\">
+                                © %d CUET Transport Section
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                """
+                .formatted(recipientName, role, Year.now().getValue());
+
+        try {
+            sendHtmlEmail(user.getEmail(), subject, htmlBody);
+        } catch (Exception ex) {
+            System.err.println("Failed to send welcome email to " + user.getEmail() + ": " + ex.getMessage());
+        }
+    }
+
+    private void sendHtmlEmail(String recipient, String subject, String htmlBody) {
+        var mimeMessage = mailSender.createMimeMessage();
+        try {
+            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
+            helper.setFrom(fromEmail);
+            helper.setTo(recipient);
+            helper.setSubject(subject);
+            helper.setText(htmlBody, true);
+            mailSender.send(mimeMessage);
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Failed to send email.", ex);
+        }
+    }
+
+    private String escapeHtml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private User resolveUserByIdentifier(String identifier) {
