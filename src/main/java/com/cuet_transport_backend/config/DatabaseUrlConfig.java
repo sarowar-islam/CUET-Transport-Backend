@@ -23,14 +23,19 @@ public class DatabaseUrlConfig {
             @Value("${app.database.url:}") String appDatabaseUrl,
             @Value("${spring.datasource.url:}") String springDatasourceUrl,
             @Value("${app.database.username:}") String appDatabaseUsername,
-            @Value("${app.database.password:}") String appDatabasePassword) {
+            @Value("${app.database.password:}") String appDatabasePassword,
+            @Value("${spring.datasource.hikari.maximum-pool-size:10}") int maximumPoolSize,
+            @Value("${spring.datasource.hikari.minimum-idle:2}") int minimumIdle,
+            @Value("${spring.datasource.hikari.connection-timeout:10000}") long connectionTimeout,
+            @Value("${spring.datasource.hikari.validation-timeout:3000}") long validationTimeout,
+            @Value("${spring.datasource.hikari.idle-timeout:300000}") long idleTimeout,
+            @Value("${spring.datasource.hikari.max-lifetime:600000}") long maxLifetime,
+            @Value("${spring.datasource.hikari.keepalive-time:30000}") long keepaliveTime) {
         String rawUrl = StringUtils.hasText(appDatabaseUrl) ? appDatabaseUrl : springDatasourceUrl;
-        if (rawUrl != null) {
-            rawUrl = rawUrl.trim();
-            if ((rawUrl.startsWith("\"") && rawUrl.endsWith("\""))
-                    || (rawUrl.startsWith("'") && rawUrl.endsWith("'"))) {
-                rawUrl = rawUrl.substring(1, rawUrl.length() - 1);
-            }
+        rawUrl = rawUrl == null ? "" : rawUrl.trim();
+        if ((rawUrl.startsWith("\"") && rawUrl.endsWith("\""))
+                || (rawUrl.startsWith("'") && rawUrl.endsWith("'"))) {
+            rawUrl = rawUrl.substring(1, rawUrl.length() - 1);
         }
 
         if (!StringUtils.hasText(rawUrl)) {
@@ -46,6 +51,8 @@ public class DatabaseUrlConfig {
             } else if (rawUrl.startsWith("jdbc:h2:")) {
                 ds.setDriverClassName("org.h2.Driver");
             }
+            applyPoolTuning(ds, maximumPoolSize, minimumIdle, connectionTimeout, validationTimeout,
+                    idleTimeout, maxLifetime, keepaliveTime);
             if (StringUtils.hasText(appDatabaseUsername)) {
                 ds.setUsername(appDatabaseUsername);
             }
@@ -64,6 +71,8 @@ public class DatabaseUrlConfig {
             HikariDataSource ds = new HikariDataSource();
             ds.setJdbcUrl(parsed.jdbcUrl());
             ds.setDriverClassName("org.postgresql.Driver");
+            applyPoolTuning(ds, maximumPoolSize, minimumIdle, connectionTimeout, validationTimeout,
+                    idleTimeout, maxLifetime, keepaliveTime);
             ds.setUsername(StringUtils.hasText(appDatabaseUsername) ? appDatabaseUsername : parsed.username());
             ds.setPassword(StringUtils.hasText(appDatabasePassword) ? appDatabasePassword : parsed.password());
             return validateOrFallback(ds);
@@ -71,6 +80,24 @@ public class DatabaseUrlConfig {
             log.warn("Failed to parse DATABASE_URL. Falling back to local H2 datasource. Reason: {}", ex.getMessage());
             return createH2Fallback();
         }
+    }
+
+    private void applyPoolTuning(
+            HikariDataSource ds,
+            int maximumPoolSize,
+            int minimumIdle,
+            long connectionTimeout,
+            long validationTimeout,
+            long idleTimeout,
+            long maxLifetime,
+            long keepaliveTime) {
+        ds.setMaximumPoolSize(maximumPoolSize);
+        ds.setMinimumIdle(minimumIdle);
+        ds.setConnectionTimeout(connectionTimeout);
+        ds.setValidationTimeout(validationTimeout);
+        ds.setIdleTimeout(idleTimeout);
+        ds.setMaxLifetime(maxLifetime);
+        ds.setKeepaliveTime(keepaliveTime);
     }
 
     private DataSource validateOrFallback(HikariDataSource ds) {

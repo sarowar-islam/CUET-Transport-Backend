@@ -6,6 +6,7 @@ import com.cuet_transport_backend.model.enums.AmbulanceRequestStatus;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -21,4 +22,8 @@ public interface AmbulanceRequestRepository extends JpaRepository<AmbulanceReque
 
     @Query("select ar from AmbulanceRequest ar join fetch ar.requester left join fetch ar.ambulance where ar.id = :id")
     Optional<AmbulanceRequest> findByIdWithRequesterAndAmbulance(@Param("id") Long id);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update AmbulanceRequest ar set ar.ambulance = null where ar.ambulance.id = :ambulanceId")
+    int clearAmbulanceAssignments(@Param("ambulanceId") Long ambulanceId);
 }

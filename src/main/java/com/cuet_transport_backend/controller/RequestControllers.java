@@ -26,10 +26,14 @@ import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -97,7 +101,20 @@ public class RequestControllers {
     // Ambulances
     @GetMapping("/ambulances")
     public List<AmbulanceResponse> allAmbulances() {
-        return ambulanceRepository.findAll().stream().map(this::toAmbulanceResponse).toList();
+        List<Ambulance> ambulances = ambulanceRepository.findAll();
+        if (ambulances.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> ambulanceIds = ambulances.stream().map(Ambulance::getId).toList();
+        Map<Long, AmbulanceLocation> latestLocationByAmbulanceId = new HashMap<>();
+        for (AmbulanceLocation location : ambulanceLocationRepository.findLatestByAmbulanceIds(ambulanceIds)) {
+            latestLocationByAmbulanceId.putIfAbsent(location.getAmbulance().getId(), location);
+        }
+
+        return ambulances.stream()
+                .map(ambulance -> toAmbulanceResponse(ambulance, latestLocationByAmbulanceId.get(ambulance.getId())))
+                .toList();
     }
 
     @GetMapping("/ambulances/{id}")
@@ -110,18 +127,38 @@ public class RequestControllers {
     @PostMapping("/ambulances")
     @PreAuthorize("hasRole('ADMIN')")
     public AmbulanceResponse createAmbulance(@Valid @RequestBody Ambulance ambulance) {
-        return toAmbulanceResponse(ambulanceRepository.save(ambulance));
+        Ambulance normalized = normalizeAmbulanceInput(ambulance);
+
+        return ambulanceRepository.findByVehicleNumberIgnoreCase(normalized.getVehicleNumber())
+                .map(this::toAmbulanceResponse)
+                .orElseGet(() -> {
+                    try {
+                        return toAmbulanceResponse(ambulanceRepository.save(normalized));
+                    } catch (DataIntegrityViolationException ex) {
+                        return ambulanceRepository.findByVehicleNumberIgnoreCase(normalized.getVehicleNumber())
+                                .map(this::toAmbulanceResponse)
+                                .orElseThrow(() -> new IllegalArgumentException(
+                                        "Ambulance with this vehicle number already exists"));
+                    }
+                });
     }
 
     @PutMapping("/ambulances/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public AmbulanceResponse updateAmbulance(@PathVariable Long id, @RequestBody Ambulance incoming) {
+        Ambulance normalized = normalizeAmbulanceInput(incoming);
+        ambulanceRepository.findByVehicleNumberIgnoreCase(normalized.getVehicleNumber())
+                .filter(existing -> !existing.getId().equals(id))
+                .ifPresent(existing -> {
+                    throw new IllegalArgumentException("Ambulance with this vehicle number already exists");
+                });
+
         Ambulance ambulance = ambulanceRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Ambulance not found"));
-        ambulance.setVehicleNumber(incoming.getVehicleNumber());
-        ambulance.setDriverName(incoming.getDriverName());
-        ambulance.setDriverPhone(incoming.getDriverPhone());
-        ambulance.setStatus(incoming.getStatus());
+        ambulance.setVehicleNumber(normalized.getVehicleNumber());
+        ambulance.setDriverName(normalized.getDriverName());
+        ambulance.setDriverPhone(normalized.getDriverPhone());
+        ambulance.setStatus(normalized.getStatus());
         return toAmbulanceResponse(ambulanceRepository.save(ambulance));
     }
 
@@ -144,15 +181,23 @@ public class RequestControllers {
 
     @DeleteMapping("/ambulances/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
     public ResponseEntity<Void> deleteAmbulance(@PathVariable Long id) {
-        ambulanceRepository.deleteById(id);
+        Ambulance ambulance = ambulanceRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Ambulance not found"));
+
+        ambulanceRequestRepository.clearAmbulanceAssignments(id);
+        ambulanceLocationRepository.deleteByAmbulanceId(id);
+        ambulanceRepository.delete(ambulance);
+
         return ResponseEntity.noContent().build();
     }
 
     // Ambulance requests
     @GetMapping("/ambulance-requests")
     public List<AmbulanceRequestResponse> allAmbulanceRequests() {
-        return ambulanceRequestRepository.findAllWithRequesterAndAmbulance().stream().map(this::toAmbulanceRequestResponse)
+        return ambulanceRequestRepository.findAllWithRequesterAndAmbulance().stream()
+                .map(this::toAmbulanceRequestResponse)
                 .toList();
     }
 
@@ -192,7 +237,7 @@ public class RequestControllers {
         User requester = userRepository.findById(requesterId)
                 .orElseThrow(() -> new IllegalArgumentException("Requester not found"));
         return ambulanceRequestRepository.findByRequesterWithRequesterAndAmbulance(requester).stream()
-            .map(this::toAmbulanceRequestResponse)
+                .map(this::toAmbulanceRequestResponse)
                 .toList();
     }
 
@@ -316,6 +361,27 @@ public class RequestControllers {
                 .orElseThrow(() -> new IllegalArgumentException("Bus request not found"));
     }
 
+    private Ambulance normalizeAmbulanceInput(Ambulance incoming) {
+        if (incoming == null) {
+            throw new IllegalArgumentException("Ambulance payload is required");
+        }
+        incoming.setVehicleNumber(normalizeText(incoming.getVehicleNumber(), "Vehicle number is required"));
+        incoming.setDriverName(normalizeText(incoming.getDriverName(), "Driver name is required"));
+        incoming.setDriverPhone(normalizeText(incoming.getDriverPhone(), "Driver phone is required"));
+        if (incoming.getStatus() == null) {
+            throw new IllegalArgumentException("Ambulance status is required");
+        }
+        return incoming;
+    }
+
+    private String normalizeText(String value, String errorMessage) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException(errorMessage);
+        }
+        return normalized;
+    }
+
     private void applyBusRequest(BusRequest req, BusRequestDto dto, User requester) {
         req.setRequester(requester);
         req.setRequesterName(dto.requesterName());
@@ -406,14 +472,20 @@ public class RequestControllers {
     }
 
     private AmbulanceResponse toAmbulanceResponse(Ambulance ambulance) {
-        LiveLocationResponse current = ambulanceLocationRepository.findTopByAmbulanceOrderByTimestampDesc(ambulance)
-                .map(l -> new LiveLocationResponse(
-                        l.getLatitude(),
-                        l.getLongitude(),
-                        l.getTimestamp(),
-                        l.getHeading(),
-                        l.getSpeed()))
+        AmbulanceLocation latest = ambulanceLocationRepository.findTopByAmbulanceOrderByTimestampDesc(ambulance)
                 .orElse(null);
+        return toAmbulanceResponse(ambulance, latest);
+    }
+
+    private AmbulanceResponse toAmbulanceResponse(Ambulance ambulance, AmbulanceLocation latestLocation) {
+        LiveLocationResponse current = latestLocation == null
+                ? null
+                : new LiveLocationResponse(
+                        latestLocation.getLatitude(),
+                        latestLocation.getLongitude(),
+                        latestLocation.getTimestamp(),
+                        latestLocation.getHeading(),
+                        latestLocation.getSpeed());
 
         return new AmbulanceResponse(
                 ambulance.getId(),
