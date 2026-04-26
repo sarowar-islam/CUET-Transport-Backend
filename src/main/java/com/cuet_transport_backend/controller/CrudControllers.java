@@ -10,6 +10,8 @@ import com.cuet_transport_backend.model.User;
 import com.cuet_transport_backend.model.enums.Direction;
 import com.cuet_transport_backend.model.enums.UserRole;
 import com.cuet_transport_backend.repository.BusRepository;
+import com.cuet_transport_backend.repository.BusRequestRepository;
+import com.cuet_transport_backend.repository.AmbulanceRequestRepository;
 import com.cuet_transport_backend.repository.DriverRepository;
 import com.cuet_transport_backend.repository.RouteRepository;
 import com.cuet_transport_backend.repository.RouteStopRepository;
@@ -28,6 +30,7 @@ import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -48,6 +51,8 @@ public class CrudControllers {
     private final RouteRepository routeRepository;
     private final RouteStopRepository routeStopRepository;
     private final ScheduleRepository scheduleRepository;
+    private final BusRequestRepository busRequestRepository;
+    private final AmbulanceRequestRepository ambulanceRequestRepository;
     private final UserRepository userRepository;
 
     public record BusRequestDto(@NotBlank String name, @NotNull Integer capacity, @NotBlank String plateNumber) {
@@ -107,7 +112,10 @@ public class CrudControllers {
 
     @DeleteMapping("/buses/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
     public ResponseEntity<Void> deleteBus(@PathVariable Long id) {
+        scheduleRepository.deleteByBusId(id);
+        busRequestRepository.clearBusAssignments(id);
         busRepository.deleteById(id);
         return ResponseEntity.noContent().build();
     }
@@ -150,7 +158,10 @@ public class CrudControllers {
 
     @DeleteMapping("/drivers/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
     public ResponseEntity<Void> deleteDriver(@PathVariable Long id) {
+        scheduleRepository.deleteByDriverId(id);
+        busRequestRepository.clearDriverAssignments(id);
         driverRepository.deleteById(id);
         return ResponseEntity.noContent().build();
     }
@@ -193,7 +204,9 @@ public class CrudControllers {
 
     @DeleteMapping("/stops/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
     public ResponseEntity<Void> deleteStop(@PathVariable Long id) {
+        routeStopRepository.deleteByStopId(id);
         stopRepository.deleteById(id);
         return ResponseEntity.noContent().build();
     }
@@ -218,7 +231,8 @@ public class CrudControllers {
                     .stream()
                     .sorted(Comparator.comparing(RouteStop::getStopOrder))
                     .map(RouteStop::getStop)
-                    .map(stop -> new StopResponse(stop.getId(), stop.getName(), stop.getLatitude(), stop.getLongitude()))
+                    .map(stop -> new StopResponse(stop.getId(), stop.getName(), stop.getLatitude(),
+                            stop.getLongitude()))
                     .toList();
             response.add(new RouteResponse(route.getId(), route.getName(), route.getColor(), stops));
         }
@@ -255,17 +269,18 @@ public class CrudControllers {
         route.setName(dto.name());
         route.setColor(dto.color());
         Route saved = routeRepository.save(route);
-        routeStopRepository.deleteByRoute(saved);
+        routeStopRepository.deleteByRouteId(saved.getId());
         saveRouteStops(saved, dto.stopIds());
         return routeById(saved.getId());
     }
 
     @DeleteMapping("/routes/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
     public ResponseEntity<Void> deleteRoute(@PathVariable Long id) {
-        Route route = routeRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("Route not found"));
-        routeStopRepository.deleteByRoute(route);
-        routeRepository.delete(route);
+        scheduleRepository.deleteByRouteId(id);
+        routeStopRepository.deleteByRouteId(id);
+        routeRepository.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 
@@ -332,6 +347,7 @@ public class CrudControllers {
 
     @DeleteMapping("/schedules/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
     public ResponseEntity<Void> deleteSchedule(@PathVariable Long id) {
         scheduleRepository.deleteById(id);
         return ResponseEntity.noContent().build();
@@ -421,7 +437,10 @@ public class CrudControllers {
 
     @DeleteMapping("/users/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
     public ResponseEntity<Void> deleteUser(@PathVariable Long id) {
+        ambulanceRequestRepository.deleteByRequesterId(id);
+        busRequestRepository.deleteByRequesterId(id);
         userRepository.deleteById(id);
         return ResponseEntity.noContent().build();
     }

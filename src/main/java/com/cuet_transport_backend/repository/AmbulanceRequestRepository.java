@@ -26,4 +26,8 @@ public interface AmbulanceRequestRepository extends JpaRepository<AmbulanceReque
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update AmbulanceRequest ar set ar.ambulance = null where ar.ambulance.id = :ambulanceId")
     int clearAmbulanceAssignments(@Param("ambulanceId") Long ambulanceId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from AmbulanceRequest ar where ar.requester.id = :requesterId")
+    int deleteByRequesterId(@Param("requesterId") Long requesterId);
 }
