@@ -284,7 +284,9 @@ public class RequestControllers {
     // Bus requests
     @GetMapping("/bus-requests")
     public List<BusRequestResponse> allBusRequests() {
-        return busRequestRepository.findAll().stream().map(this::toBusRequestResponse).toList();
+        return busRequestRepository.findAllWithRequesterAndAssignments().stream()
+                .map(this::toBusRequestResponse)
+                .toList();
     }
 
     @GetMapping("/bus-requests/{id}")
@@ -307,13 +309,17 @@ public class RequestControllers {
     public List<BusRequestResponse> busByRequester(@PathVariable Long requesterId) {
         User requester = userRepository.findById(requesterId)
                 .orElseThrow(() -> new IllegalArgumentException("Requester not found"));
-        return busRequestRepository.findByRequester(requester).stream().map(this::toBusRequestResponse).toList();
+        return busRequestRepository.findByRequesterWithRequesterAndAssignments(requester).stream()
+                .map(this::toBusRequestResponse)
+                .toList();
     }
 
     @GetMapping("/bus-requests/by-status/{status}")
     public List<BusRequestResponse> busByStatus(@PathVariable String status) {
         BusRequestStatus parsed = BusRequestStatus.fromValue(status);
-        return busRequestRepository.findByStatus(parsed).stream().map(this::toBusRequestResponse).toList();
+        return busRequestRepository.findByStatusWithRequesterAndAssignments(parsed).stream()
+                .map(this::toBusRequestResponse)
+                .toList();
     }
 
     @PutMapping("/bus-requests/{requestId}/approve")
@@ -357,7 +363,7 @@ public class RequestControllers {
     }
 
     private BusRequest findBusRequest(Long id) {
-        return busRequestRepository.findById(id)
+        return busRequestRepository.findByIdWithRequesterAndAssignments(id)
                 .orElseThrow(() -> new IllegalArgumentException("Bus request not found"));
     }
 

@@ -24,8 +24,10 @@ import jakarta.validation.constraints.NotNull;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -225,18 +227,26 @@ public class CrudControllers {
 
     @GetMapping("/routes")
     public List<RouteResponse> allRoutes() {
-        List<RouteResponse> response = new ArrayList<>();
-        for (Route route : routeRepository.findAll()) {
-            List<StopResponse> stops = routeStopRepository.findByRouteWithStopOrderByStopOrderAsc(route)
-                    .stream()
-                    .sorted(Comparator.comparing(RouteStop::getStopOrder))
-                    .map(RouteStop::getStop)
-                    .map(stop -> new StopResponse(stop.getId(), stop.getName(), stop.getLatitude(),
-                            stop.getLongitude()))
-                    .toList();
-            response.add(new RouteResponse(route.getId(), route.getName(), route.getColor(), stops));
+        List<Route> routes = routeRepository.findAll();
+        if (routes.isEmpty()) {
+            return List.of();
         }
-        return response;
+
+        Map<Long, List<StopResponse>> stopsByRouteId = new HashMap<>();
+        for (RouteStop routeStop : routeStopRepository.findAllWithRouteAndStopOrdered()) {
+            Long routeId = routeStop.getRoute().getId();
+            Stop stop = routeStop.getStop();
+            stopsByRouteId.computeIfAbsent(routeId, ignored -> new ArrayList<>())
+                    .add(new StopResponse(stop.getId(), stop.getName(), stop.getLatitude(), stop.getLongitude()));
+        }
+
+        return routes.stream()
+                .map(route -> new RouteResponse(
+                        route.getId(),
+                        route.getName(),
+                        route.getColor(),
+                        stopsByRouteId.getOrDefault(route.getId(), List.of())))
+                .toList();
     }
 
     @GetMapping("/routes/{id}")
@@ -318,12 +328,12 @@ public class CrudControllers {
 
     @GetMapping("/schedules")
     public List<ScheduleResponse> allSchedules() {
-        return scheduleRepository.findAll().stream().map(this::toScheduleResponse).toList();
+        return scheduleRepository.findAllWithRelations().stream().map(this::toScheduleResponse).toList();
     }
 
     @GetMapping("/schedules/{id}")
     public ScheduleResponse scheduleById(@PathVariable Long id) {
-        Schedule schedule = scheduleRepository.findById(id)
+        Schedule schedule = scheduleRepository.findByIdWithRelations(id)
                 .orElseThrow(() -> new IllegalArgumentException("Schedule not found"));
         return toScheduleResponse(schedule);
     }
@@ -356,21 +366,21 @@ public class CrudControllers {
     @GetMapping("/schedules/by-bus/{busId}")
     public List<ScheduleResponse> byBus(@PathVariable Long busId) {
         Bus bus = busRepository.findById(busId).orElseThrow(() -> new IllegalArgumentException("Bus not found"));
-        return scheduleRepository.findByBus(bus).stream().map(this::toScheduleResponse).toList();
+        return scheduleRepository.findByBusWithRelations(bus).stream().map(this::toScheduleResponse).toList();
     }
 
     @GetMapping("/schedules/by-route/{routeId}")
     public List<ScheduleResponse> byRoute(@PathVariable Long routeId) {
         Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new IllegalArgumentException("Route not found"));
-        return scheduleRepository.findByRoute(route).stream().map(this::toScheduleResponse).toList();
+        return scheduleRepository.findByRouteWithRelations(route).stream().map(this::toScheduleResponse).toList();
     }
 
     @GetMapping("/schedules/by-driver/{driverId}")
     public List<ScheduleResponse> byDriver(@PathVariable Long driverId) {
         Driver driver = driverRepository.findById(driverId)
                 .orElseThrow(() -> new IllegalArgumentException("Driver not found"));
-        return scheduleRepository.findByDriver(driver).stream().map(this::toScheduleResponse).toList();
+        return scheduleRepository.findByDriverWithRelations(driver).stream().map(this::toScheduleResponse).toList();
     }
 
     private void applySchedule(Schedule schedule, ScheduleRequestDto dto) {

@@ -11,6 +11,14 @@ import org.springframework.data.repository.query.Param;
 public interface RouteStopRepository extends JpaRepository<RouteStop, Long> {
     List<RouteStop> findByRouteOrderByStopOrderAsc(Route route);
 
+    @Query("""
+            select rs from RouteStop rs
+            join fetch rs.route
+            join fetch rs.stop
+            order by rs.route.id asc, rs.stopOrder asc
+            """)
+    List<RouteStop> findAllWithRouteAndStopOrdered();
+
     @Query("select rs from RouteStop rs join fetch rs.stop where rs.route = :route order by rs.stopOrder asc")
     List<RouteStop> findByRouteWithStopOrderByStopOrderAsc(@Param("route") Route route);
 
