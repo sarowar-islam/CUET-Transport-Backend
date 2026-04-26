@@ -76,11 +76,16 @@ public class AuthService {
     }
 
     public AuthPayload login(LoginRequest request) {
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.username(), request.password()));
+        String identifier = request.username() == null ? "" : request.username().trim();
+        String password = request.password() == null ? "" : request.password().trim();
 
-        User user = userRepository.findByUsername(request.username())
-                .orElseThrow(() -> new IllegalArgumentException("Invalid credentials"));
+        User user = userRepository.findByUsername(identifier)
+                .or(() -> userRepository.findByEmail(identifier.toLowerCase()))
+                .orElseThrow(() -> new IllegalArgumentException("Invalid username or password"));
+
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new IllegalArgumentException("Invalid username or password");
+        }
 
         if (!Boolean.TRUE.equals(user.getIsVerified())) {
             applyNewVerificationCode(user);
